@@ -57,13 +57,15 @@ class Choreographer(object):
         for msg in MidiFile(midi_path):
             if msg.is_meta:
                 continue
+            if str(msg.type) in ['program_change', 'control_change']:
+                continue
 
             # If time, rotate all commands
             if msg.time:
                 total_time += msg.time
                 for node_name, node in self.nodes.items():
                     # If no changes with the current command, just increase timeout
-                    if len(node['cmd'].changes) is 0:
+                    if len(node['cmd'].changes) == 0:
                         node['cmd'].increase_timeout(msg.time)
                     # If commands staged, append to list and stage a new command
                     else:

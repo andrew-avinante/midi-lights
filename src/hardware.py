@@ -51,8 +51,8 @@ class Hardware(object):
         changes = command.changes
         sleep(command.timeout)
 
-        if len(changes) == 1 and '*' == changes.keys()[0]:
-            self.set_all_channels_to_value(changes.values()[0])
+        if len(changes) == 1 and '*' in changes:
+            self.set_all_channels_to_value('*')
         else:
             for channel, val in changes.items():
                 self.set_channel_value(channel, val)

@@ -115,6 +115,10 @@ class Channel(object):
         if self.active_low_mode:
             pin_value = 1 - pin_value
 
+        current_state = wiringpi.digitalRead(self.pin_id)
+        if current_state == pin_value:
+            wiringpi.digitalWrite(self.pin_id, 0)
+
         wiringpi.digitalWrite(self.pin_id, pin_value)
         logging.debug({
             'channel': self.channel_id,

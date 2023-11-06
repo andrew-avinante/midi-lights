@@ -22,6 +22,7 @@ class Choreographer(object):
         self.channel_nodes = {}
         self.measure_timestamps = []
         self.global_time = 0
+        self.current_channel_state = {}
         for node_id, node in config.settings['nodes'].items():
             self.nodes[node_id] = {
                 'channels': node['channels'].keys(),
@@ -49,16 +50,50 @@ class Choreographer(object):
         for i in range(song_config["total_bars"]):
             self.measure_timestamps.append(i * seconds_per_bar)
 
-    def get_current_bar_config(self, song_config):
+    def get_current_bar_config(self, song_config, all_notes):
         for i, v in enumerate(self.measure_timestamps):
             if self.global_time <= v:
                 for j in song_config["measures"].keys():
                     if i - 1 in range(int(j.split('-')[0]), int(j.split('-')[1]) + 1) or self.global_time == 0:
-                        return song_config["measures"][j]
+                        measure_config = song_config["measures"][j]
+                        if "use" in measure_config.keys():
+                            measure_config = song_config["parts"][measure_config["use"]]
+
+                        for k, v in all_notes.items():
+                            if k not in measure_config['note_channel_map'].keys():
+                                if 'discard' not in measure_config:
+                                    measure_config['discard'] = {}
+                                measure_config['discard'][k] = [i for i in v if i not in list(set(item for sublist in measure_config["note_channel_map"].values() for item in sublist))]
+
+                        return measure_config
                     
                 return None
                     
         return None
+    
+    def get_all_noets_per_channel(self, song_config):
+        notes_channels = {}
+
+        for v in song_config['measures'].values():
+            for k2, v2 in v.items():
+                if k2 == "use":
+                    continue
+                if k2 in notes_channels:
+                    list(set(notes_channels[k2] + v2))
+                else:
+                    notes_channels[k2] = v2
+
+        if "parts" in song_config:
+            for v in song_config["parts"].values():
+                for k2, v2 in v.items():
+                    if k2 == "note_channel_map":
+                        for k3, v3 in v2.items():
+                            if k3 in notes_channels:
+                                notes_channels[k3] = list(set(notes_channels[k3] + v3))
+                            else:
+                                notes_channels[k3] = v3
+
+        return notes_channels
             
     def midi_commands(self, song_config):
         """
@@ -75,6 +110,7 @@ class Choreographer(object):
 
         midi_path = './music/{}'.format(song_config['midi'])
         commands_path = './music/{}'.format(song_config['commands'])
+        notes_per_channel = self.get_all_noets_per_channel(song_config)
 
         logging.info("Building commands for midi: {}".format(midi_path))
 
@@ -101,22 +137,27 @@ class Choreographer(object):
 
 
             self.global_time += msg.time
-            measure_config = self.get_current_bar_config(song_config)
+            measure_config = self.get_current_bar_config(song_config, notes_per_channel)
 
-            if measure_config is None or msg.channel not in measure_config['channels']:
+            if measure_config is None:
                 continue
 
             # Get data from midi
             note_enabled = 1 if str(msg.type) == str('note_on') else 0
             note = self.midi_to_note(msg.note)
 
-            if note not in used_notes:
-                used_notes.append(note)
+            channel_ids = []
 
             if note not in measure_config['note_channel_map']:
-                continue
-
-            channel_ids = measure_config['note_channel_map'][note]
+                if 'discard' not in measure_config or note not in measure_config['discard']:
+                    continue
+                else:
+                    channel_ids = measure_config['discard'][note]
+                    note_enabled = 0
+            else:
+                channel_ids = measure_config['note_channel_map'][note]
+                if msg.channel not in measure_config['channels']:
+                    continue
 
             # Debug log
             logging.debug("MIDI: {}".format(json.dumps({'note': note, 'on': note_enabled, 'channel_ids': channel_ids})))
@@ -126,11 +167,17 @@ class Choreographer(object):
                 logging.debug("[{node}] {channel} {state}".format(node=node_id, channel=ch_id,
                                                                   state=("on" if note_enabled else "off")))
 
+                if ch_id not in self.current_channel_state:
+                    self.current_channel_state[ch_id] = 0
+
+                if self.current_channel_state[ch_id] == 0 and note_enabled == 0:
+                    continue
+
                 if len(self.nodes[node_id]['commands']) > 1:
                     current_cmd = self.nodes[node_id]['commands'].pop()
                     previous_cmd = self.nodes[node_id]['commands'][-1]
 
-                    if ch_id in previous_cmd.changes and previous_cmd.changes[ch_id]:
+                    if ch_id in previous_cmd.changes and previous_cmd.changes[ch_id] and previous_cmd.changes[ch_id] == 1 and note_enabled:
                         turn_off_command = Command(0.02)
                         self.nodes[node_id]['commands'].append(turn_off_command)
                         turn_off_command.set_channel(ch_id, 0)
@@ -138,6 +185,7 @@ class Choreographer(object):
                     self.nodes[node_id]['commands'].append(current_cmd)
 
                 self.nodes[node_id]['cmd'].set_channel(ch_id, note_enabled)
+                self.current_channel_state[ch_id] = note_enabled
 
         # Write commands to file for caching
         for node_name, node in self.nodes.items():

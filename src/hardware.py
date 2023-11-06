@@ -115,24 +115,18 @@ class Channel(object):
         if self.active_low_mode:
             pin_value = 1 - pin_value
 
-        current_state = wiringpi.digitalRead(self.pin_id)
-
-        if current_state != pin_value:
-            # The current state is different from the desired state, so set the pin
-            wiringpi.digitalWrite(self.pin_id, pin_value)
-            logging.debug({
-                'channel': self.channel_id,
-                'pin': self.pin_id,
-                'value': pin_value
-            })
+        if pin_value == 1:
+            pin_value = wiringpi.HIGH
         else:
-            # The current state matches the desired state, no action required
-            logging.debug({
-                'channel': self.channel_id,
-                'pin': self.pin_id,
-                'value': f'Skipped (Already {pin_value})'
-            })
+            pin_value = wiringpi.LOW
 
+        wiringpi.pinMode(self.pin_id, wiringpi.OUTPUT)
+        wiringpi.digitalWrite(self.pin_id, pin_value)
+        logging.debug({
+            'channel': self.channel_id,
+            'pin': self.pin_id,
+            'value': pin_value
+        })
 
 
 if __name__ == "__main__":

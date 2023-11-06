@@ -38,7 +38,7 @@ def receive_commands():
     global script
     body = request.json
 
-    script = map(lambda r: Command(r['timeout'], r['changes']), body['commands'])
+    script = list(map(lambda r: Command(r['timeout'], r['changes']), body['commands']))
 
     response_body = {'commands': len(script), 'total_runtime': sum(cm.timeout for cm in script)}
     logging.info("Loaded commands: {}".format(response_body))

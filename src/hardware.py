@@ -115,13 +115,13 @@ class Channel(object):
         if self.active_low_mode:
             pin_value = 1 - pin_value
 
-        if pin_value == 1:
-            pin_value = wiringpi.HIGH
-        else:
-            pin_value = wiringpi.LOW
+        if self.pin_id in [3, 4, 5]:
+            print("BEFORE", wiringpi.digitalRead(self.pin_id))
 
-        wiringpi.pinMode(self.pin_id, wiringpi.OUTPUT)
         wiringpi.digitalWrite(self.pin_id, pin_value)
+
+        if self.pin_id in [3, 4, 5]:
+            print("AFTER", wiringpi.digitalRead(self.pin_id))
         logging.debug({
             'channel': self.channel_id,
             'pin': self.pin_id,

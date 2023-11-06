@@ -53,7 +53,7 @@ class Choreographer(object):
         for i, v in enumerate(self.measure_timestamps):
             if self.global_time <= v:
                 for j in song_config["measures"].keys():
-                    if i - 1 in range(int(j.split('-')[0]), int(j.split('-')[1]) + 1):
+                    if i - 1 in range(int(j.split('-')[0]), int(j.split('-')[1]) + 1) or self.global_time == 0:
                         return song_config["measures"][j]
                     
                 return None
@@ -125,6 +125,17 @@ class Choreographer(object):
                 node_id = self.channel_nodes[ch_id]
                 logging.debug("[{node}] {channel} {state}".format(node=node_id, channel=ch_id,
                                                                   state=("on" if note_enabled else "off")))
+
+                if len(self.nodes[node_id]['commands']) > 1:
+                    current_cmd = self.nodes[node_id]['commands'].pop()
+                    previous_cmd = self.nodes[node_id]['commands'][-1]
+
+                    if ch_id in previous_cmd.changes and previous_cmd.changes[ch_id]:
+                        turn_off_command = Command(0.02)
+                        self.nodes[node_id]['commands'].append(turn_off_command)
+                        turn_off_command.set_channel(ch_id, 0)
+                        current_cmd.timeout -= 0.02
+                    self.nodes[node_id]['commands'].append(current_cmd)
 
                 self.nodes[node_id]['cmd'].set_channel(ch_id, note_enabled)
 

@@ -42,7 +42,7 @@ def receive_commands():
 
     response_body = {'commands': len(script), 'total_runtime': sum(cm.timeout for cm in script)}
     logging.info("Loaded commands: {}".format(response_body))
-
+    hw.set_all_channels_to_value(0)
     response.content_type = "application/json"
     return json.dumps(response_body)
 

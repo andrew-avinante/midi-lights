@@ -50,25 +50,29 @@ class Choreographer(object):
         for i in range(song_config["total_bars"]):
             self.measure_timestamps.append(i * seconds_per_bar)
 
-    def get_current_bar_config(self, song_config, all_notes):
+    def get_current_bar(self):
         for i, v in enumerate(self.measure_timestamps):
-            if self.global_time <= v:
-                for j in song_config["measures"].keys():
-                    if i - 1 in range(int(j.split('-')[0]), int(j.split('-')[1]) + 1) or self.global_time == 0:
-                        measure_config = song_config["measures"][j]
-                        if "use" in measure_config.keys():
-                            measure_config = song_config["parts"][measure_config["use"]]
+            if self.global_time < v:
+                return i - 1
+            
+        return 0
 
-                        for k, v in all_notes.items():
-                            if k not in measure_config['note_channel_map'].keys():
-                                if 'discard' not in measure_config:
-                                    measure_config['discard'] = {}
-                                measure_config['discard'][k] = [i for i in v if i not in list(set(item for sublist in measure_config["note_channel_map"].values() for item in sublist))]
+    def get_current_bar_config(self, song_config, all_notes):
 
-                        return measure_config
-                    
-                return None
-                    
+        for j in song_config["measures"].keys():
+            if self.get_current_bar() in range(int(j.split('-')[0]), int(j.split('-')[1]) + 1) or self.global_time == 0:
+                measure_config = song_config["measures"][j]
+                if "use" in measure_config.keys():
+                    measure_config = song_config["parts"][measure_config["use"]]
+
+                for k, v in all_notes.items():
+                    if k not in measure_config['note_channel_map'].keys():
+                        if 'discard' not in measure_config:
+                            measure_config['discard'] = {}
+                        measure_config['discard'][k] = [i for i in v if i not in list(set(item for sublist in measure_config["note_channel_map"].values() for item in sublist))]
+
+                return measure_config
+            
         return None
     
     def get_all_noets_per_channel(self, song_config):
@@ -94,6 +98,27 @@ class Choreographer(object):
                                 notes_channels[k3] = v3
 
         return notes_channels
+    
+    def post_process(self, commands):
+        result = []
+
+        for current, previous in zip(commands[1:len(commands) - 1], commands[:len(commands) - 2]):
+            current_changes = current.changes
+            previous_changes = previous.changes
+            half_timeout = previous.timeout / 2
+            zero_command = Command(half_timeout)
+            for channel in previous.changes.keys():
+                if previous_changes[channel] == 1 and channel in current_changes and current_changes[channel] == previous_changes[channel]:
+                    zero_command.set_channel(channel, 0)
+
+            result.append(previous)
+            if len(zero_command.changes):
+                previous.timeout = half_timeout
+                result.append(zero_command)
+
+        result.append(commands[-1])
+
+        return result
             
     def midi_commands(self, song_config):
         """
@@ -133,7 +158,7 @@ class Choreographer(object):
                     # If commands staged, append to list and stage a new command
                     else:
                         node['commands'].append(node['cmd'])
-                        node['cmd'] = Command(msg.time)
+                        node['cmd'] = Command(msg.time, None, self.get_current_bar())
 
 
             self.global_time += msg.time
@@ -147,6 +172,7 @@ class Choreographer(object):
             note = self.midi_to_note(msg.note)
 
             channel_ids = []
+            is_discarding = False
 
             if note not in measure_config['note_channel_map']:
                 if 'discard' not in measure_config or note not in measure_config['discard']:
@@ -154,9 +180,10 @@ class Choreographer(object):
                 else:
                     channel_ids = measure_config['discard'][note]
                     note_enabled = 0
+                is_discarding = True
             else:
                 channel_ids = measure_config['note_channel_map'][note]
-                if msg.channel not in measure_config['channels']:
+                if msg.channel not in measure_config['channels'] and note_enabled:
                     continue
 
             # Debug log
@@ -170,22 +197,12 @@ class Choreographer(object):
                 if ch_id not in self.current_channel_state:
                     self.current_channel_state[ch_id] = 0
 
-                if self.current_channel_state[ch_id] == 0 and note_enabled == 0:
+                if self.current_channel_state[ch_id] == 0 and note_enabled == 0 and is_discarding:
                     continue
-
-                if len(self.nodes[node_id]['commands']) > 1:
-                    current_cmd = self.nodes[node_id]['commands'].pop()
-                    previous_cmd = self.nodes[node_id]['commands'][-1]
-
-                    if ch_id in previous_cmd.changes and previous_cmd.changes[ch_id] and previous_cmd.changes[ch_id] == 1 and note_enabled:
-                        turn_off_command = Command(0.02)
-                        self.nodes[node_id]['commands'].append(turn_off_command)
-                        turn_off_command.set_channel(ch_id, 0)
-                        current_cmd.timeout -= 0.02
-                    self.nodes[node_id]['commands'].append(current_cmd)
 
                 self.nodes[node_id]['cmd'].set_channel(ch_id, note_enabled)
                 self.current_channel_state[ch_id] = note_enabled
+
 
         # Write commands to file for caching
         for node_name, node in self.nodes.items():
@@ -205,7 +222,7 @@ class Choreographer(object):
                     node['cmd'] = None
 
                 # Write to file
-                json.dump([cmd.__dict__ for cmd in node['commands']], cache_file,
+                json.dump([cmd.__dict__ for cmd in self.post_process(node['commands'])], cache_file,
                           indent=2, separators=(',', ': '), sort_keys=True)
 
     @staticmethod
